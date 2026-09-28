@@ -1,31 +1,22 @@
 import {
+  MessageCircle,
   ListChecks,
   CalendarRange,
   Library,
-  StickyNote,
-  Inbox,
-  Command,
-  Settings,
   X,
   Flame,
 } from "lucide-react";
 import { Glass, Label, Meter, Rule, cn } from "./ui";
 import { profile } from "../data/mockData";
 
-export type ViewId = "tasks" | "schedule" | "resources";
+export type ViewId = "home" | "tasks" | "schedule" | "resources";
 
-const navItems: { id: ViewId; label: string; hint: string; icon: typeof ListChecks; count: string }[] = [
+const navItems: { id: ViewId; label: string; hint: string; icon: typeof ListChecks; count?: string }[] = [
+  { id: "home", label: "Inicio", hint: "Asistente", icon: MessageCircle },
   { id: "tasks", label: "Gestor de tareas", hint: "Kanban", icon: ListChecks, count: "12" },
   { id: "schedule", label: "Calendario y rutas", hint: "Mayo 2026", icon: CalendarRange, count: "13" },
   { id: "resources", label: "Base de recursos", hint: "Skills · archivos · vídeo", icon: Library, count: "15" },
 ];
-
-const quickIcons: Record<string, typeof StickyNote> = {
-  note: StickyNote,
-  inbox: Inbox,
-  command: Command,
-  settings: Settings,
-};
 
 export function Sidebar({
   view,
@@ -118,7 +109,9 @@ export function Sidebar({
                         {item.hint}
                       </span>
                     </span>
-                    <span className="tnum font-mono text-[11px] text-mist">{item.count}</span>
+                    {item.count && (
+                      <span className="tnum font-mono text-[11px] text-mist">{item.count}</span>
+                    )}
                   </button>
                 </li>
               );
@@ -167,29 +160,6 @@ export function Sidebar({
               </span>
             </div>
           </Glass>
-        </div>
-
-        {/* Acceso rápido */}
-        <div className="mt-6 px-3">
-          <Label className="px-2 pb-2">Acceso rápido</Label>
-          <ul className="space-y-0.5">
-            {profile.quickLinks.map((link) => {
-              const Icon = quickIcons[link.icon] ?? StickyNote;
-              return (
-                <li key={link.label}>
-                  <button className="flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-[12.5px] text-mist transition-colors hover:bg-[rgba(138,163,171,0.07)] hover:text-chalk">
-                    <Icon size={15} strokeWidth={1.6} />
-                    <span className="flex-1 truncate text-left">{link.label}</span>
-                    {link.count > 0 && (
-                      <span className="tnum rounded-[4px] border border-[rgba(138,163,171,0.18)] px-1.5 py-0.5 font-mono text-[9.5px]">
-                        {link.count}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
         </div>
 
         <div className="mt-auto">

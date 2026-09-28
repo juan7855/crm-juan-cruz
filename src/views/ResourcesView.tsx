@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -7,7 +7,6 @@ import {
   FileSpreadsheet,
   FileCode2,
   PenTool,
-  Download,
   Play,
   ExternalLink,
   Sparkles,
@@ -35,9 +34,14 @@ const kindLabel: Record<Resource["kind"], string> = {
   video: "Vídeo / Link",
 };
 
-export function ResourcesView() {
+export function ResourcesView({ focusToken }: { focusToken?: number }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof resourceFilters)[number]["id"]>("all");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (focusToken) searchRef.current?.focus();
+  }, [focusToken]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -86,6 +90,7 @@ export function ResourcesView() {
             className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-mist"
           />
           <input
+            ref={searchRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar por título, categoría, formato o plataforma…"
@@ -201,19 +206,11 @@ function FileCard({ r }: { r: Extract<Resource, { kind: "file" }> }) {
       </div>
       <h4 className="mt-3.5 text-[14px] leading-snug font-medium text-chalk">{r.title}</h4>
       <p className="mt-2 flex-1 text-[11.5px] leading-[1.65] text-mist">{r.description}</p>
-      <div className="mt-3.5 flex items-center justify-between border-t border-[rgba(138,163,171,0.12)] pt-3">
-        <div>
-          <div className="tnum font-mono text-[10px] text-chalk">{r.size}</div>
-          <div className="mt-0.5 font-mono text-[9px] tracking-[0.12em] text-mist/80 uppercase">
-            {r.created}
-          </div>
+      <div className="mt-3.5 border-t border-[rgba(138,163,171,0.12)] pt-3">
+        <div className="tnum font-mono text-[10px] text-chalk">{r.size}</div>
+        <div className="mt-0.5 font-mono text-[9px] tracking-[0.12em] text-mist/80 uppercase">
+          {r.created}
         </div>
-        <button
-          title="Descargar"
-          className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[rgba(138,163,171,0.18)] text-mist transition-colors hover:border-[rgba(56,224,200,0.45)] hover:text-aqua"
-        >
-          <Download size={14} strokeWidth={1.8} />
-        </button>
       </div>
     </Glass>
   );

@@ -96,12 +96,6 @@ export const profile = {
   ],
   energy: 4, // de 5
   mode: "Profundo",
-  quickLinks: [
-    { label: "Notas rápidas", count: 3, icon: "note" },
-    { label: "Bandeja de entrada", count: 7, icon: "inbox" },
-    { label: "Atajos de teclado", count: 12, icon: "command" },
-    { label: "Ajustes del hub", count: 0, icon: "settings" },
-  ],
 };
 
 export const columns: { id: TaskStatus; title: string; hint: string }[] = [

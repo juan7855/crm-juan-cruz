@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Plus, CalendarClock, Timer, AlertTriangle } from "lucide-react";
+import { Plus, X, CalendarClock, Timer, AlertTriangle } from "lucide-react";
 import { Glass, Label, Meter, Tag, Button, cn } from "../components/ui";
 import { columns, tasks as seedTasks, type Task, type TaskStatus } from "../data/mockData";
 
@@ -23,6 +23,28 @@ function isThisWeek(due: string) {
 export function TaskBoard() {
   const [items, setItems] = useState<Task[]>(seedTasks);
   const [filter, setFilter] = useState<(typeof filters)[number]["id"]>("all");
+  const [composing, setComposing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+
+  const addTask = () => {
+    const title = draftTitle.trim();
+    if (!title) return;
+    setItems((prev) => [
+      {
+        id: `t-${Date.now()}`,
+        title,
+        description: "Sin descripción todavía.",
+        due: "2026-05-31",
+        tags: [],
+        priority: "media",
+        status: "todo",
+        estimate: "—",
+      },
+      ...prev,
+    ]);
+    setDraftTitle("");
+    setComposing(false);
+  };
 
   const visible = useMemo(() => {
     if (filter === "high") return items.filter((t) => t.priority === "alta");
@@ -69,11 +91,57 @@ export function TaskBoard() {
               </button>
             ))}
           </div>
-          <Button variant="solid">
+          <Button variant="solid" onClick={() => setComposing((v) => !v)}>
             <Plus size={13} strokeWidth={2.2} /> Nueva tarea
           </Button>
         </div>
       </div>
+
+      {/* Alta rápida de tarea */}
+      <AnimatePresence initial={false}>
+        {composing && (
+          <motion.form
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.22 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              addTask();
+            }}
+            className="overflow-hidden"
+          >
+            <div className="mt-5 flex items-center gap-2.5 rounded-[12px] border border-[rgba(56,224,200,0.28)] bg-[rgba(56,224,200,0.06)] px-4 py-3">
+              <input
+                autoFocus
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                placeholder="Título de la tarea…"
+                aria-label="Título de la nueva tarea"
+                className="flex-1 bg-transparent text-[13.5px] text-chalk placeholder:text-mist/70 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!draftTitle.trim()}
+                className="rounded-[7px] bg-aqua px-3 py-1.5 font-mono text-[9.5px] tracking-[0.14em] text-[#04211f] uppercase transition-opacity hover:bg-aqua-light disabled:opacity-40"
+              >
+                Añadir
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setComposing(false);
+                  setDraftTitle("");
+                }}
+                aria-label="Cancelar"
+                className="rounded-[7px] p-1.5 text-mist transition-colors hover:text-chalk"
+              >
+                <X size={15} strokeWidth={1.8} />
+              </button>
+            </div>
+          </motion.form>
+        )}
+      </AnimatePresence>
 
       {/* Progreso global */}
       <div className="mt-7 flex flex-wrap items-center gap-x-8 gap-y-3 rounded-[12px] border border-[rgba(138,163,171,0.12)] bg-[rgba(10,18,23,0.5)] px-5 py-4">

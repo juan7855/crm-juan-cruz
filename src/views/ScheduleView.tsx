@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MapPin, Clock, ArrowRight, Route, CalendarDays, ListTree } from "lucide-react";
-import { Glass, Label, Meter, Tag, Button, cn } from "../components/ui";
+import { MapPin, Clock, Route, CalendarDays, ListTree } from "lucide-react";
+import { Glass, Label, Meter, Tag, cn } from "../components/ui";
 import {
   calendar,
   events,
@@ -65,7 +65,6 @@ export function ScheduleView() {
               </button>
             ))}
           </div>
-          <Button>Ir a hoy</Button>
         </div>
       </div>
 
@@ -312,9 +311,6 @@ export function ScheduleView() {
                   </span>
                 </div>
                 <p className="mt-2.5 text-[11px] leading-relaxed text-mist/90">{r.note}</p>
-                <button className="mt-3 flex items-center gap-1.5 font-mono text-[9.5px] tracking-[0.16em] text-aqua uppercase transition-colors hover:text-aqua-light">
-                  Abrir detalle <ArrowRight size={11} strokeWidth={2} />
-                </button>
               </Glass>
             </motion.div>
           ))}

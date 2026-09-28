@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion, MotionConfig } from "framer-motion";
-import { Menu, Bell, Search } from "lucide-react";
+import { Menu, Search } from "lucide-react";
 import { Sidebar, type ViewId } from "./components/Sidebar";
 import { StatusBand } from "./components/StatusBand";
+import { HomeView } from "./views/HomeView";
 import { TaskBoard } from "./views/TaskBoard";
 import { ScheduleView } from "./views/ScheduleView";
 import { ResourcesView } from "./views/ResourcesView";
@@ -30,10 +31,10 @@ function Backdrop() {
 
 function TopBar({
   onMenu,
-  query,
+  onSearch,
 }: {
   onMenu: () => void;
-  query: string;
+  onSearch: () => void;
 }) {
   const [clock, setClock] = useState(() => new Date());
   useEffect(() => {
@@ -45,6 +46,17 @@ function TopBar({
     minute: "2-digit",
     hour12: false,
   });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        onSearch();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onSearch]);
 
   return (
     <header className="relative z-10 flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pt-5 pb-4 sm:px-7 lg:px-8">
@@ -71,14 +83,16 @@ function TopBar({
         </div>
       </div>
 
-      {/* Búsqueda simulada (la funcional vive en Base de recursos) */}
-      <div className="hidden items-center gap-2.5 rounded-[10px] border border-[rgba(138,163,171,0.16)] bg-[rgba(10,18,23,0.55)] px-3.5 py-2.5 xl:flex">
+      <button
+        onClick={onSearch}
+        className="hidden items-center gap-2.5 rounded-[10px] border border-[rgba(138,163,171,0.16)] bg-[rgba(10,18,23,0.55)] px-3.5 py-2.5 text-left transition-colors hover:border-[rgba(56,224,200,0.35)] xl:flex"
+      >
         <Search size={14} strokeWidth={1.8} className="text-mist" />
-        <span className="text-[12px] text-mist">{query}</span>
+        <span className="text-[12px] text-mist">Buscar en la base de recursos…</span>
         <span className="ml-2 rounded-[4px] border border-[rgba(138,163,171,0.22)] px-1.5 py-0.5 font-mono text-[9px] tracking-[0.12em] text-mist uppercase">
           ⌘K
         </span>
-      </div>
+      </button>
 
       <div className="flex items-center gap-3">
         <div className="text-right">
@@ -87,22 +101,34 @@ function TopBar({
             {time}
           </div>
         </div>
-        <button
-          className="relative rounded-[10px] border border-[rgba(138,163,171,0.18)] p-2.5 text-mist transition-colors hover:border-[rgba(240,163,94,0.45)] hover:text-amber"
-          aria-label="Avisos"
-        >
-          <Bell size={16} strokeWidth={1.8} />
-          <span className="absolute top-2 right-2 h-[6px] w-[6px] rounded-full bg-amber" />
-        </button>
       </div>
     </header>
   );
 }
 
+function useSessionClock() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const h = String(Math.floor(seconds / 3600)).padStart(2, "0");
+  const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+  const s = String(seconds % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
 export default function App() {
-  const [view, setView] = useState<ViewId>("tasks");
+  const [view, setView] = useState<ViewId>("home");
   const [navOpen, setNavOpen] = useState(false);
+  const [searchToken, setSearchToken] = useState(0);
   const reduce = useReducedMotion();
+  const session = useSessionClock();
+
+  const goToSearch = () => {
+    setView("resources");
+    setSearchToken((t) => t + 1);
+  };
 
   return (
     <MotionConfig reducedMotion="user">
@@ -117,9 +143,9 @@ export default function App() {
       />
 
       <main className="relative z-10 min-h-screen lg:pl-[276px]">
-        <TopBar onMenu={() => setNavOpen(true)} query="Buscar en todo el hub…" />
+        <TopBar onMenu={() => setNavOpen(true)} onSearch={goToSearch} />
 
-        <StatusBand />
+        {view !== "home" && <StatusBand />}
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -129,9 +155,10 @@ export default function App() {
             exit={reduce ? undefined : { opacity: 0, y: -6 }}
             transition={{ duration: 0.3, ease: [0.22, 0.61, 0.36, 1] }}
           >
+            {view === "home" && <HomeView />}
             {view === "tasks" && <TaskBoard />}
             {view === "schedule" && <ScheduleView />}
-            {view === "resources" && <ResourcesView />}
+            {view === "resources" && <ResourcesView focusToken={searchToken} />}
           </motion.div>
         </AnimatePresence>
 
@@ -144,8 +171,7 @@ export default function App() {
               <span className="screenprint">Datos de prueba · mockData</span>
             </div>
             <div className={cn("flex items-center gap-5")}>
-              <span className="screenprint">Sincronizado hace 2 min</span>
-              <span className="screenprint text-aqua">Sesión 04:12:38</span>
+              <span className="screenprint text-aqua">Sesión {session}</span>
             </div>
           </div>
         </footer>
