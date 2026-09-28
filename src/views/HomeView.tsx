@@ -16,7 +16,7 @@ const initialMessages: ChatMessage[] = [
   {
     id: "m-0",
     role: "assistant",
-    text: `Hola, ${firstName}. Todavía no hay un modelo de IA conectado a Núcleo — cuando integres uno, sus respuestas aparecerán aquí. Mientras tanto puedo darte lecturas rápidas de tus tareas, tu agenda o tus rutas.`,
+    text: `Hola, ${firstName}. Soy el asistente de Núcleo, conectado a DeepSeek. Puedo hablarte de tus tareas, tu agenda o tus rutas, o de lo que necesites.`,
   },
 ];
 
@@ -26,27 +26,35 @@ const suggestions = [
   "¿Cuál es mi próxima ruta?",
 ];
 
-function localAnswer(raw: string): string {
-  const q = raw.toLowerCase();
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[-*]\s+/gm, "");
+}
 
-  if (q.includes("tarea") || q.includes("pendiente")) {
-    const active = tasks.filter((t) => t.status !== "done");
-    const alta = active.filter((t) => t.priority === "alta").length;
-    const next = [...active].sort((a, b) => a.due.localeCompare(b.due))[0];
-    return `Tienes ${active.length} tareas activas (${alta} de prioridad alta). La más próxima a vencer es «${next?.title}».`;
-  }
+function buildSystemPrompt(): string {
+  const active = tasks.filter((t) => t.status !== "done");
+  const alta = active.filter((t) => t.priority === "alta").length;
+  const nextTask = [...active].sort((a, b) => a.due.localeCompare(b.due))[0];
+  const agenda = timeline.slice(0, 4).map((t) => `${t.time} ${t.title}`).join("; ");
+  const nextRoute = routes[0];
 
-  if (q.includes("agenda") || q.includes("hoy") || q.includes("calendario")) {
-    const next = timeline.slice(0, 3).map((t) => `${t.time} · ${t.title}`).join(" — ");
-    return `Para hoy: ${next}.`;
-  }
-
-  if (q.includes("ruta")) {
-    const r = routes[0];
-    return `Tu próxima ruta es «${r.title}»: sale a las ${r.departure} desde ${r.from} hacia ${r.to} (${r.distance}, ${r.duration}).`;
-  }
-
-  return "Aún no tengo un modelo de IA conectado para responder eso con libertad. Puedo darte datos de tus tareas, tu agenda o tus rutas — o cuéntame qué integración quieres conectar primero.";
+  return [
+    `Eres el asistente de Núcleo, el hub personal de ${profile.name} (${profile.role}).`,
+    "Responde en español, de forma breve, cálida y directa. Usa el contexto solo si es relevante para la pregunta.",
+    "No uses formato markdown (sin **, #, listas con guiones, etc.) — el chat solo muestra texto plano.",
+    "Contexto actual del usuario:",
+    `- Tareas activas: ${active.length} (${alta} de prioridad alta). Próxima a vencer: "${nextTask?.title}".`,
+    `- Agenda de hoy: ${agenda}.`,
+    nextRoute
+      ? `- Próxima ruta: "${nextRoute.title}", sale a las ${nextRoute.departure} desde ${nextRoute.from} hacia ${nextRoute.to}.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function HomeView() {
@@ -59,20 +67,44 @@ export function HomeView() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, thinking]);
 
-  const send = (text: string) => {
+  const send = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || thinking) return;
     const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", text: trimmed };
-    setMessages((prev) => [...prev, userMsg]);
+    const history = [...messages, userMsg];
+    setMessages(history);
     setDraft("");
     setThinking(true);
-    window.setTimeout(() => {
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: buildSystemPrompt() },
+            ...history.map((m) => ({ role: m.role, content: m.text })),
+          ],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const reply =
+        res.ok && data.reply
+          ? stripMarkdown(data.reply)
+          : (data.error ?? "El asistente no respondió. Inténtalo de nuevo.");
+      setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: "assistant", text: reply }]);
+    } catch {
       setMessages((prev) => [
         ...prev,
-        { id: `a-${Date.now()}`, role: "assistant", text: localAnswer(trimmed) },
+        {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          text: "No se pudo conectar con el asistente. Revisa tu conexión e inténtalo de nuevo.",
+        },
       ]);
+    } finally {
       setThinking(false);
-    }, 420);
+    }
   };
 
   return (
@@ -83,9 +115,8 @@ export function HomeView() {
           Habla con tu <span className="italic text-aqua-light">asistente</span>
         </h2>
         <p className="mt-2.5 max-w-[52ch] text-[13.5px] leading-relaxed text-mist">
-          Este es el punto de entrada al hub: aquí es donde llamarás a los modelos de IA que
-          integremos. Por ahora responde con datos locales; cuando conectemos un modelo, sus
-          respuestas llegarán por este mismo canal.
+          Este es el punto de entrada al hub, conectado a DeepSeek. Puede leer tus tareas, tu
+          agenda y tus rutas para responder con contexto.
         </p>
 
         <Glass className="mt-7 flex h-[520px] flex-col overflow-hidden">
@@ -134,7 +165,8 @@ export function HomeView() {
                 <button
                   key={s}
                   onClick={() => send(s)}
-                  className="flex items-center gap-1.5 rounded-[7px] border border-[rgba(138,163,171,0.18)] px-2.5 py-1.5 text-[11.5px] text-mist transition-colors hover:border-[rgba(56,224,200,0.4)] hover:text-aqua"
+                  disabled={thinking}
+                  className="flex items-center gap-1.5 rounded-[7px] border border-[rgba(138,163,171,0.18)] px-2.5 py-1.5 text-[11.5px] text-mist transition-colors hover:border-[rgba(56,224,200,0.4)] hover:text-aqua disabled:opacity-50"
                 >
                   <Sparkles size={11} strokeWidth={1.8} /> {s}
                 </button>
@@ -152,13 +184,14 @@ export function HomeView() {
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              disabled={thinking}
               placeholder="Escribe un mensaje…"
               aria-label="Mensaje para el asistente"
-              className="flex-1 rounded-[9px] border border-[rgba(138,163,171,0.18)] bg-[rgba(138,163,171,0.06)] px-3.5 py-2.5 text-[13px] text-chalk placeholder:text-mist/70 transition-colors focus:border-[rgba(56,224,200,0.55)] focus:bg-[rgba(56,224,200,0.05)] focus:outline-none"
+              className="flex-1 rounded-[9px] border border-[rgba(138,163,171,0.18)] bg-[rgba(138,163,171,0.06)] px-3.5 py-2.5 text-[13px] text-chalk placeholder:text-mist/70 transition-colors focus:border-[rgba(56,224,200,0.55)] focus:bg-[rgba(56,224,200,0.05)] focus:outline-none disabled:opacity-60"
             />
             <button
               type="submit"
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || thinking}
               aria-label="Enviar mensaje"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] bg-aqua text-[#04211f] transition-opacity hover:bg-aqua-light disabled:opacity-40"
             >
