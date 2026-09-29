@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Send, Sparkles, Bot, User, ChevronDown, Pencil } from "lucide-react";
+import { Send, Sparkles, Bot, User, ChevronDown } from "lucide-react";
 import { Glass, Label, Meter, cn } from "../components/ui";
 import { profile, tasks, timeline, routes } from "../data/mockData";
 
@@ -10,43 +10,39 @@ interface ChatMessage {
   text: string;
 }
 
-interface ModelOption {
-  id: string;
+interface ModelMeta {
   label: string;
   hint: string;
-  defaultBudget: number;
+  // USD por cada 1M tokens de salida, tarifa de hora pico publicada por DeepSeek.
+  // Se usa solo para estimar "disponibles" a partir del saldo real de la cuenta.
+  outputPerMillionUsd?: number;
 }
 
-interface ModelUsage {
-  used: number;
-  budget: number;
-}
-
-type UsageMap = Record<string, ModelUsage>;
-
-const MODELS: ModelOption[] = [
-  { id: "deepseek-chat", label: "DeepSeek Chat", hint: "Rápido · conversación general", defaultBudget: 200_000 },
-  {
-    id: "deepseek-reasoner",
-    label: "DeepSeek Reasoner",
-    hint: "Razonamiento profundo · más lento",
-    defaultBudget: 100_000,
+const MODEL_META: Record<string, ModelMeta> = {
+  "deepseek-flash": { label: "DeepSeek Flash", hint: "Rápido · conversación general", outputPerMillionUsd: 1.2 },
+  "deepseek-v4-pro": {
+    label: "DeepSeek V4 Pro",
+    hint: "Modelo avanzado · más lento y más caro",
+    outputPerMillionUsd: 3.96,
   },
-];
+};
 
-const USAGE_STORAGE_KEY = "nucleo:token-usage-v1";
+const FALLBACK_MODEL_IDS = ["deepseek-flash", "deepseek-v4-pro"];
 
-function loadUsage(): UsageMap {
-  const fallback: UsageMap = Object.fromEntries(
-    MODELS.map((m) => [m.id, { used: 0, budget: m.defaultBudget }]),
-  );
+function metaFor(id: string): ModelMeta {
+  return MODEL_META[id] ?? { label: id, hint: "Modelo de DeepSeek" };
+}
+
+const USAGE_STORAGE_KEY = "nucleo:token-usage-v2";
+
+function loadUsage(): Record<string, number> {
   try {
     const raw = localStorage.getItem(USAGE_STORAGE_KEY);
-    if (!raw) return fallback;
+    if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return { ...fallback, ...parsed };
+    return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
-    return fallback;
+    return {};
   }
 }
 
@@ -105,12 +101,12 @@ export function HomeView() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [thinking, setThinking] = useState(false);
-  const [model, setModel] = useState(MODELS[0].id);
-  const [usage, setUsage] = useState<UsageMap>(() => loadUsage());
-  const [editingModel, setEditingModel] = useState<string | null>(null);
-  const [budgetDraft, setBudgetDraft] = useState("");
+  const [modelIds, setModelIds] = useState<string[]>(FALLBACK_MODEL_IDS);
+  const [model, setModel] = useState(FALLBACK_MODEL_IDS[0]);
+  const [usage, setUsage] = useState<Record<string, number>>(() => loadUsage());
+  const [balance, setBalance] = useState<{ amount: number; currency: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const activeModel = MODELS.find((m) => m.id === model) ?? MODELS[0];
+  const activeMeta = metaFor(model);
 
   useEffect(() => {
     try {
@@ -120,31 +116,42 @@ export function HomeView() {
     }
   }, [usage]);
 
-  const startEditingBudget = (id: string, current: number) => {
-    setEditingModel(id);
-    setBudgetDraft(String(current));
-  };
+  // Modelos reales disponibles para esta cuenta, en vez de una lista fija que puede quedar desactualizada.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/models")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || !Array.isArray(data.models) || data.models.length === 0) return;
+        setModelIds(data.models);
+        setModel((current) => (data.models.includes(current) ? current : data.models[0]));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const commitBudget = (id: string) => {
-    const parsed = Number(budgetDraft);
-    setUsage((prev) => {
-      const current = prev[id] ?? {
-        used: 0,
-        budget: MODELS.find((m) => m.id === id)?.defaultBudget ?? 100_000,
-      };
-      const budget = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : current.budget;
-      return { ...prev, [id]: { ...current, budget } };
-    });
-    setEditingModel(null);
-  };
+  const refreshBalance = useCallback(() => {
+    fetch("/api/balance")
+      .then((r) => r.json())
+      .then((data) => {
+        const info = data.balance_infos?.[0];
+        if (info) setBalance({ amount: Number(info.total_balance), currency: info.currency });
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshBalance();
+  }, [refreshBalance]);
 
   const handleModelChange = (nextId: string) => {
     if (nextId === model) return;
     setModel(nextId);
-    const next = MODELS.find((m) => m.id === nextId);
     setMessages((prev) => [
       ...prev,
-      { id: `sys-${Date.now()}`, role: "system", text: `Modelo activo: ${next?.label ?? nextId}` },
+      { id: `sys-${Date.now()}`, role: "system", text: `Modelo activo: ${metaFor(nextId).label}` },
     ]);
   };
 
@@ -184,10 +191,8 @@ export function HomeView() {
 
       const totalTokens = data.usage?.total_tokens;
       if (res.ok && typeof totalTokens === "number") {
-        setUsage((prev) => {
-          const current = prev[model] ?? { used: 0, budget: activeModel.defaultBudget };
-          return { ...prev, [model]: { ...current, used: current.used + totalTokens } };
-        });
+        setUsage((prev) => ({ ...prev, [model]: (prev[model] ?? 0) + totalTokens }));
+        refreshBalance();
       }
     } catch {
       setMessages((prev) => [
@@ -222,20 +227,20 @@ export function HomeView() {
                 <span className="live-dot h-[6px] w-[6px] rounded-full bg-aqua" />
                 <span className="screenprint">Modelo activo</span>
               </div>
-              <div className="mt-1 truncate pl-3.5 text-[11px] text-mist">{activeModel.hint}</div>
+              <div className="mt-1 truncate pl-3.5 text-[11px] text-mist">{activeMeta.hint}</div>
             </div>
             <div className="relative">
               <select
                 value={model}
                 onChange={(e) => handleModelChange(e.target.value)}
                 disabled={thinking}
-                title={activeModel.hint}
+                title={activeMeta.hint}
                 aria-label="Elegir modelo de IA"
                 className="appearance-none rounded-[8px] border border-[rgba(56,224,200,0.28)] bg-[rgba(56,224,200,0.08)] py-1.5 pr-7 pl-3 font-mono text-[10px] tracking-[0.1em] text-aqua-light uppercase transition-colors hover:border-[rgba(56,224,200,0.5)] focus:outline-none disabled:opacity-60"
               >
-                {MODELS.map((m) => (
-                  <option key={m.id} value={m.id} className="bg-[#0e161b] text-chalk normal-case">
-                    {m.label}
+                {modelIds.map((id) => (
+                  <option key={id} value={id} className="bg-[#0e161b] text-chalk normal-case">
+                    {metaFor(id).label}
                   </option>
                 ))}
               </select>
@@ -248,16 +253,20 @@ export function HomeView() {
           </div>
 
           <div className="space-y-2.5 border-b border-[rgba(138,163,171,0.12)] px-5 py-3">
-            {MODELS.map((m) => {
-              const u = usage[m.id] ?? { used: 0, budget: m.defaultBudget };
-              const remaining = Math.max(0, u.budget - u.used);
-              const usedPct = u.budget > 0 ? (u.used / u.budget) * 100 : 0;
-              const remPct = u.budget > 0 ? (remaining / u.budget) * 100 : 0;
-              const isActive = m.id === model;
-              const isEditing = editingModel === m.id;
+            {modelIds.map((id) => {
+              const meta = metaFor(id);
+              const used = usage[id] ?? 0;
+              const remaining =
+                balance && meta.outputPerMillionUsd
+                  ? (balance.amount * 1_000_000) / meta.outputPerMillionUsd
+                  : null;
+              const total = remaining !== null ? used + remaining : null;
+              const usedPct = total ? (used / total) * 100 : used > 0 ? 100 : 0;
+              const remPct = total ? ((remaining as number) / total) * 100 : 0;
+              const isActive = id === model;
 
               return (
-                <div key={m.id}>
+                <div key={id}>
                   <div className="flex items-center justify-between gap-2">
                     <span
                       className={cn(
@@ -265,33 +274,12 @@ export function HomeView() {
                         isActive ? "font-medium text-aqua-light" : "text-mist",
                       )}
                     >
-                      {m.label}
+                      {meta.label}
                     </span>
-                    {isEditing ? (
-                      <input
-                        autoFocus
-                        type="number"
-                        min={1000}
-                        step={1000}
-                        value={budgetDraft}
-                        onChange={(e) => setBudgetDraft(e.target.value)}
-                        onBlur={() => commitBudget(m.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitBudget(m.id);
-                          if (e.key === "Escape") setEditingModel(null);
-                        }}
-                        className="w-24 rounded-[5px] border border-[rgba(56,224,200,0.4)] bg-[rgba(6,10,13,0.6)] px-1.5 py-0.5 text-right font-mono text-[9.5px] text-chalk focus:outline-none"
-                      />
-                    ) : (
-                      <button
-                        onClick={() => startEditingBudget(m.id, u.budget)}
-                        title="Editar tu presupuesto de tokens para este modelo"
-                        className="flex items-center gap-1 font-mono text-[9.5px] text-mist transition-colors hover:text-aqua"
-                      >
-                        {formatTokens(u.used)} / {formatTokens(u.budget)} tok
-                        <Pencil size={9} strokeWidth={2} />
-                      </button>
-                    )}
+                    <span className="font-mono text-[9.5px] text-mist">
+                      {formatTokens(used)} usados
+                      {remaining !== null ? ` · ~${formatTokens(remaining)} disp.` : ""}
+                    </span>
                   </div>
                   <div className="mt-1.5 grid grid-cols-2 gap-2">
                     <div>
@@ -311,8 +299,9 @@ export function HomeView() {
               );
             })}
             <p className="text-[9.5px] leading-relaxed text-mist/70">
-              Presupuesto local editable (clic en la cifra) — no es el saldo real de tu cuenta
-              DeepSeek, solo un seguimiento guardado en este navegador.
+              {balance
+                ? `Disponibles = tu saldo real de DeepSeek (${balance.amount.toFixed(2)} ${balance.currency}) ÷ el precio de salida publicado por DeepSeek (tarifa de hora pico). Usados: acumulado real en este navegador.`
+                : "No se pudo leer el saldo real de tu cuenta DeepSeek en este momento — mostrando solo lo usado en este navegador."}
             </p>
           </div>
 
@@ -361,7 +350,7 @@ export function HomeView() {
             {thinking && (
               <div className="flex items-center gap-2.5 pl-9 text-[11.5px] text-mist">
                 <span className="live-dot h-[6px] w-[6px] rounded-full bg-aqua" />
-                {activeModel.id === "deepseek-reasoner" ? "Razonando…" : "Pensando…"}
+                Pensando…
               </div>
             )}
           </div>

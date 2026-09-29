@@ -1,5 +1,5 @@
-const ALLOWED_MODELS = new Set(["deepseek-chat", "deepseek-reasoner"]);
-const DEFAULT_MODEL = "deepseek-chat";
+const ALLOWED_MODELS = new Set(["deepseek-flash", "deepseek-v4-pro"]);
+const DEFAULT_MODEL = "deepseek-flash";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -20,8 +20,6 @@ export default async function handler(req, res) {
   }
 
   const resolvedModel = ALLOWED_MODELS.has(model) ? model : DEFAULT_MODEL;
-  // deepseek-reasoner ignora/objeta temperature y otros parámetros de muestreo.
-  const extraParams = resolvedModel === "deepseek-reasoner" ? {} : { temperature: 0.6 };
 
   try {
     const upstream = await fetch("https://api.deepseek.com/chat/completions", {
@@ -33,7 +31,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: resolvedModel,
         messages,
-        ...extraParams,
+        temperature: 0.6,
       }),
     });
 
