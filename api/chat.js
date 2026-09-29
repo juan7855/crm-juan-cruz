@@ -1,3 +1,6 @@
+const ALLOWED_MODELS = new Set(["deepseek-chat", "deepseek-reasoner"]);
+const DEFAULT_MODEL = "deepseek-chat";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Método no permitido." });
@@ -10,11 +13,15 @@ export default async function handler(req, res) {
     return;
   }
 
-  const { messages } = req.body ?? {};
+  const { messages, model } = req.body ?? {};
   if (!Array.isArray(messages) || messages.length === 0) {
     res.status(400).json({ error: "Falta el campo 'messages'." });
     return;
   }
+
+  const resolvedModel = ALLOWED_MODELS.has(model) ? model : DEFAULT_MODEL;
+  // deepseek-reasoner ignora/objeta temperature y otros parámetros de muestreo.
+  const extraParams = resolvedModel === "deepseek-reasoner" ? {} : { temperature: 0.6 };
 
   try {
     const upstream = await fetch("https://api.deepseek.com/chat/completions", {
@@ -24,9 +31,9 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "deepseek-chat",
+        model: resolvedModel,
         messages,
-        temperature: 0.6,
+        ...extraParams,
       }),
     });
 
@@ -38,7 +45,7 @@ export default async function handler(req, res) {
 
     const data = await upstream.json();
     const reply = data.choices?.[0]?.message?.content?.trim() ?? "";
-    res.status(200).json({ reply });
+    res.status(200).json({ reply, model: resolvedModel });
   } catch {
     res.status(502).json({ error: "No se pudo contactar con DeepSeek." });
   }

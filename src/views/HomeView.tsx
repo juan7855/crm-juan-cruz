@@ -1,14 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Send, Sparkles, Bot, User } from "lucide-react";
+import { Send, Sparkles, Bot, User, ChevronDown } from "lucide-react";
 import { Glass, Label, cn } from "../components/ui";
 import { profile, tasks, timeline, routes } from "../data/mockData";
 
 interface ChatMessage {
   id: string;
-  role: "assistant" | "user";
+  role: "assistant" | "user" | "system";
   text: string;
 }
+
+interface ModelOption {
+  id: string;
+  label: string;
+  hint: string;
+}
+
+const MODELS: ModelOption[] = [
+  { id: "deepseek-chat", label: "DeepSeek Chat", hint: "Rápido · conversación general" },
+  { id: "deepseek-reasoner", label: "DeepSeek Reasoner", hint: "Razonamiento profundo · más lento" },
+];
 
 const firstName = profile.name.split(" ")[0];
 
@@ -16,7 +27,7 @@ const initialMessages: ChatMessage[] = [
   {
     id: "m-0",
     role: "assistant",
-    text: `Hola, ${firstName}. Soy el asistente de Núcleo, conectado a DeepSeek. Puedo hablarte de tus tareas, tu agenda o tus rutas, o de lo que necesites.`,
+    text: `Hola, ${firstName}. Soy el asistente de Núcleo. Puedo hablarte de tus tareas, tu agenda o tus rutas, o de lo que necesites — elige el modelo arriba a la derecha.`,
   },
 ];
 
@@ -61,7 +72,19 @@ export function HomeView() {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [draft, setDraft] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [model, setModel] = useState(MODELS[0].id);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const activeModel = MODELS.find((m) => m.id === model) ?? MODELS[0];
+
+  const handleModelChange = (nextId: string) => {
+    if (nextId === model) return;
+    setModel(nextId);
+    const next = MODELS.find((m) => m.id === nextId);
+    setMessages((prev) => [
+      ...prev,
+      { id: `sys-${Date.now()}`, role: "system", text: `Modelo activo: ${next?.label ?? nextId}` },
+    ]);
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -81,9 +104,12 @@ export function HomeView() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model,
           messages: [
             { role: "system", content: buildSystemPrompt() },
-            ...history.map((m) => ({ role: m.role, content: m.text })),
+            ...history
+              .filter((m) => m.role !== "system")
+              .map((m) => ({ role: m.role, content: m.text })),
           ],
         }),
       });
@@ -120,46 +146,88 @@ export function HomeView() {
         </p>
 
         <Glass className="mt-7 flex h-[520px] flex-col overflow-hidden">
-          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-            {messages.map((m) => (
-              <motion.div
-                key={m.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25 }}
-                className={cn("flex items-start gap-2.5", m.role === "user" && "flex-row-reverse")}
+          <div className="flex items-center justify-between gap-3 border-b border-[rgba(138,163,171,0.12)] px-5 py-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="live-dot h-[6px] w-[6px] rounded-full bg-aqua" />
+                <span className="screenprint">Modelo activo</span>
+              </div>
+              <div className="mt-1 truncate pl-3.5 text-[11px] text-mist">{activeModel.hint}</div>
+            </div>
+            <div className="relative">
+              <select
+                value={model}
+                onChange={(e) => handleModelChange(e.target.value)}
+                disabled={thinking}
+                title={activeModel.hint}
+                aria-label="Elegir modelo de IA"
+                className="appearance-none rounded-[8px] border border-[rgba(56,224,200,0.28)] bg-[rgba(56,224,200,0.08)] py-1.5 pr-7 pl-3 font-mono text-[10px] tracking-[0.1em] text-aqua-light uppercase transition-colors hover:border-[rgba(56,224,200,0.5)] focus:outline-none disabled:opacity-60"
               >
-                <span
-                  className={cn(
-                    "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
-                    m.role === "assistant"
-                      ? "border-[rgba(56,224,200,0.35)] bg-[rgba(56,224,200,0.1)] text-aqua-light"
-                      : "border-[rgba(138,163,171,0.25)] bg-[rgba(138,163,171,0.08)] text-mist",
-                  )}
+                {MODELS.map((m) => (
+                  <option key={m.id} value={m.id} className="bg-[#0e161b] text-chalk normal-case">
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={12}
+                strokeWidth={2}
+                className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-aqua-light"
+              />
+            </div>
+          </div>
+
+          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+            {messages.map((m) => {
+              if (m.role === "system") {
+                return (
+                  <div key={m.id} className="flex justify-center">
+                    <span className="rounded-full border border-[rgba(138,163,171,0.18)] bg-[rgba(138,163,171,0.06)] px-3 py-1 font-mono text-[9px] tracking-[0.12em] text-mist uppercase">
+                      {m.text}
+                    </span>
+                  </div>
+                );
+              }
+              return (
+                <motion.div
+                  key={m.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className={cn("flex items-start gap-2.5", m.role === "user" && "flex-row-reverse")}
                 >
-                  {m.role === "assistant" ? <Bot size={13} strokeWidth={1.8} /> : <User size={13} strokeWidth={1.8} />}
-                </span>
-                <div
-                  className={cn(
-                    "max-w-[80%] rounded-[12px] border px-3.5 py-2.5 text-[13px] leading-relaxed",
-                    m.role === "assistant"
-                      ? "border-[rgba(138,163,171,0.14)] bg-[rgba(138,163,171,0.05)] text-chalk"
-                      : "border-[rgba(56,224,200,0.28)] bg-[rgba(56,224,200,0.08)] text-chalk",
-                  )}
-                >
-                  {m.text}
-                </div>
-              </motion.div>
-            ))}
+                  <span
+                    className={cn(
+                      "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
+                      m.role === "assistant"
+                        ? "border-[rgba(56,224,200,0.35)] bg-[rgba(56,224,200,0.1)] text-aqua-light"
+                        : "border-[rgba(138,163,171,0.25)] bg-[rgba(138,163,171,0.08)] text-mist",
+                    )}
+                  >
+                    {m.role === "assistant" ? <Bot size={13} strokeWidth={1.8} /> : <User size={13} strokeWidth={1.8} />}
+                  </span>
+                  <div
+                    className={cn(
+                      "max-w-[80%] rounded-[12px] border px-3.5 py-2.5 text-[13px] leading-relaxed",
+                      m.role === "assistant"
+                        ? "border-[rgba(138,163,171,0.14)] bg-[rgba(138,163,171,0.05)] text-chalk"
+                        : "border-[rgba(56,224,200,0.28)] bg-[rgba(56,224,200,0.08)] text-chalk",
+                    )}
+                  >
+                    {m.text}
+                  </div>
+                </motion.div>
+              );
+            })}
             {thinking && (
               <div className="flex items-center gap-2.5 pl-9 text-[11.5px] text-mist">
                 <span className="live-dot h-[6px] w-[6px] rounded-full bg-aqua" />
-                Pensando…
+                {activeModel.id === "deepseek-reasoner" ? "Razonando…" : "Pensando…"}
               </div>
             )}
           </div>
 
-          {messages.length <= 1 && (
+          {!messages.some((m) => m.role === "user") && (
             <div className="flex flex-wrap gap-1.5 border-t border-[rgba(138,163,171,0.12)] px-5 py-3">
               {suggestions.map((s) => (
                 <button
