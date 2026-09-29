@@ -45,7 +45,7 @@ export default async function handler(req, res) {
 
     const data = await upstream.json();
     const reply = data.choices?.[0]?.message?.content?.trim() ?? "";
-    res.status(200).json({ reply, model: resolvedModel });
+    res.status(200).json({ reply, model: resolvedModel, usage: data.usage ?? null });
   } catch {
     res.status(502).json({ error: "No se pudo contactar con DeepSeek." });
   }
